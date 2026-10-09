@@ -57,6 +57,7 @@ input[type=color]{width:100%;height:38px;border:1px solid var(--line);border-rad
 }
 #canvas{z-index:1;pointer-events:auto}
 #inkPreview{z-index:2;pointer-events:none}
+#world{pointer-events:none}
 #objects{position:absolute;left:0;top:0;pointer-events:none}
 .obj{position:absolute;pointer-events:auto;user-select:none;touch-action:none;transform-origin:center;box-shadow:0 8px 28px rgba(30,40,20,.12)}
 .obj.selected{outline:2px solid var(--pink);outline-offset:4px}
@@ -262,7 +263,7 @@ canvas.addEventListener('pointermove',e=>{
   const a=[...S.pointers.values()];if(!S.gesture)S.gesture={dist:dist(a[0],a[1]),zoom:S.zoom,panX:S.panX,panY:S.panY,mid:mid(a[0],a[1])};
   const g=S.gesture,d=dist(a[0],a[1]),m=mid(a[0],a[1]);
   S.zoom=clamp(g.zoom*d/g.dist,.2,5);S.panX=g.panX+(m.x-g.mid.x);S.panY=g.panY+(m.y-g.mid.y);
-  applyTransform();e.preventDefault();return
+  render();renderGrid();e.preventDefault();return
  }
  if(!S.draw || (e.pointerType!=='pen' && e.pointerType!=='mouse'))return;
  const samples=e.getCoalescedEvents?e.getCoalescedEvents():[e];
@@ -320,7 +321,7 @@ canvas.addEventListener('lostpointercapture',e=>{
 function dist(a,b){return Math.hypot(a.clientX-b.clientX,a.clientY-b.clientY)||1}function mid(a,b){return{x:(a.clientX+b.clientX)/2,y:(a.clientY+b.clientY)/2}}
 function applyTransform(){world.style.transform=`translate(${S.panX}px,${S.panY}px) scale(${S.zoom})`;$('zoom').textContent=Math.round(S.zoom*100)+'%';}
 function renderGrid(){stage.style.backgroundImage=S.grid?'radial-gradient(#cbd2c7 1px,transparent 1px)':'none';stage.style.backgroundSize=(22*S.zoom)+'px '+(22*S.zoom)+'px'}
-function transformAll(){applyTransform();renderGrid()}
+function transformAll(){render();renderGrid()}
 
 function addNote(p,text='Новая заметка'){
  const o={id:uid(),type:'note',x:p.x,y:p.y,w:230,h:145,text};S.objects.push(o);renderObjects();saveSoon();
