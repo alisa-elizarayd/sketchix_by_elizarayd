@@ -49,13 +49,14 @@ input[type=color]{width:100%;height:38px;border:1px solid var(--line);border-rad
 .status{font-size:8px;color:var(--muted);display:flex;gap:6px;align-items:center;padding:3px}.dot{width:7px;height:7px;border-radius:50%;background:#6da05d}
 .stage{position:relative;flex:1;min-width:0;overflow:hidden;touch-action:none;-webkit-user-select:none;user-select:none;background:#edf0ea;cursor:crosshair}
 #world{position:absolute;left:0;top:0;transform-origin:0 0}
-#canvas{
- position:absolute;left:0;top:0;display:block;
+#canvas,#inkPreview{
+ position:absolute;inset:0;width:100%;height:100%;display:block;
  touch-action:none;
- pointer-events:auto;
  -webkit-user-select:none;user-select:none;
  -webkit-touch-callout:none;
 }
+#canvas{z-index:1;pointer-events:auto}
+#inkPreview{z-index:2;pointer-events:none}
 #objects{position:absolute;left:0;top:0;pointer-events:none}
 .obj{position:absolute;pointer-events:auto;user-select:none;touch-action:none;transform-origin:center;box-shadow:0 8px 28px rgba(30,40,20,.12)}
 .obj.selected{outline:2px solid var(--pink);outline-offset:4px}
@@ -146,7 +147,7 @@ input[type=color]{width:100%;height:38px;border:1px solid var(--line);border-rad
  </div>
 </aside>
 <section class="stage" id="stage">
- <div id="world"><canvas id="canvas"></canvas><div id="objects"></div></div>
+ <canvas id="canvas"></canvas><canvas id="inkPreview" aria-hidden="true"></canvas><div id="world"><div id="objects"></div></div>
  <div class="float"><button id="minus">−</button><span class="zoom" id="zoom">100%</span><button id="plus">+</button><button id="reset">↺</button></div>
  <div class="info">Apple Pencil: рисуйте • пальцем не рисует • 2 пальца: pan + zoom</div>
 </section>
@@ -162,9 +163,9 @@ input[type=color]{width:100%;height:38px;border:1px solid var(--line);border-rad
 
 <script>
 (()=>{'use strict';
-const $=id=>document.getElementById(id), canvas=$('canvas'),ctx=canvas.getContext('2d'),stage=$('stage'),world=$('world'),objects=$('objects');
+const $=id=>document.getElementById(id), canvas=$('canvas'),ctx=canvas.getContext('2d'),previewCanvas=$('inkPreview'),pctx=previewCanvas.getContext('2d'),stage=$('stage'),world=$('world'),objects=$('objects');
 const KEY='sketchspace-infinite-v2';
-const S={tool:'pen',color:'#3F4A2E',size:4,zoom:1,panX:0,panY:0,dpr:Math.min(3,devicePixelRatio||1),W:5000,H:5000,
+const S={tool:'pen',color:'#3F4A2E',size:4,zoom:1,panX:0,panY:0,dpr:Math.min(2,devicePixelRatio||1),W:5000,H:5000,
  strokes:[],objects:[],history:[],future:[],pointers:new Map(),draw:null,gesture:null,grid:true,boardId:null,boards:[]};
 
 const uid=()=>crypto.randomUUID?.()||Date.now().toString(36)+Math.random().toString(36).slice(2);
@@ -178,11 +179,17 @@ function restore(x){let d=JSON.parse(x);S.strokes=d.strokes||[];S.objects=d.obje
 function undo(){if(!S.history.length)return;S.future.push(snap());restore(S.history.pop())}
 function redo(){if(!S.future.length)return;S.history.push(snap());restore(S.future.pop())}
 
-function setupCanvas(){canvas.width=S.W*S.dpr;canvas.height=S.H*S.dpr;canvas.style.width=S.W+'px';canvas.style.height=S.H+'px';ctx.setTransform(S.dpr,0,0,S.dpr,0,0);render()}
+function resizeCanvas(){
+ const r=stage.getBoundingClientRect();
+ const w=Math.max(1,Math.floor(r.width)),h=Math.max(1,Math.floor(r.height));
+ for(const c of [canvas,previewCanvas]){c.width=w*S.dpr;c.height=h*S.dpr;c.style.width=w+'px';c.style.height=h+'px'}
+}
+function setupCanvas(){resizeCanvas();render()}
 function render(){
- ctx.setTransform(S.dpr,0,0,S.dpr,0,0);ctx.clearRect(0,0,S.W,S.H);ctx.fillStyle='#fff';ctx.fillRect(0,0,S.W,S.H);
- for(const s of S.strokes)drawStroke(ctx,s);
- applyTransform();
+ const w=Math.max(1,Math.floor(stage.clientWidth)),h=Math.max(1,Math.floor(stage.clientHeight));
+ ctx.setTransform(S.dpr,0,0,S.dpr,0,0);ctx.clearRect(0,0,w,h);ctx.fillStyle='#fff';ctx.fillRect(0,0,w,h);
+ ctx.save();ctx.translate(S.panX,S.panY);ctx.scale(S.zoom,S.zoom);for(const s of S.strokes)drawStroke(ctx,s);ctx.restore();
+ pctx.setTransform(S.dpr,0,0,S.dpr,0,0);pctx.clearRect(0,0,w,h);applyTransform();
 }
 function drawStroke(c,s){
  c.save();c.lineCap='round';c.lineJoin='round';c.lineWidth=s.size||4;c.strokeStyle=s.color||'#3F4A2E';
@@ -236,7 +243,7 @@ canvas.addEventListener('pointerdown',e=>{
  if(e.pointerType==='mouse'&&e.button!==0)return;
  e.preventDefault();
  S.pointers.set(e.pointerId,e);
- try{stage.setPointerCapture(e.pointerId)}catch(_){}
+ try{canvas.setPointerCapture(e.pointerId)}catch(_){}
  if(S.pointers.size===2){
   S.draw=null;const a=[...S.pointers.values()];
   S.gesture={dist:dist(a[0],a[1]),zoom:S.zoom,panX:S.panX,panY:S.panY,mid:mid(a[0],a[1])};return
@@ -272,10 +279,11 @@ canvas.addEventListener('pointermove',e=>{
  preview()
 });
 function preview(){
- render();if(!S.draw)return;
- const d=S.draw;
- if(S.tool==='pen'||S.tool==='eraser')drawStroke(ctx,{tool:S.tool,color:S.color,size:S.size,points:d.points});
- else{const p=d.last,a=d.start;let x={tool:S.tool,color:S.color,size:S.size};if(S.tool==='line')Object.assign(x,{x1:a.x,y1:a.y,x2:p.x,y2:p.y});if(S.tool==='rect')Object.assign(x,{x:a.x,y:a.y,w:p.x-a.x,h:p.y-a.y});if(S.tool==='circle')Object.assign(x,{cx:a.x,cy:a.y,r:Math.hypot(p.x-a.x,p.y-a.y)});drawStroke(ctx,x)}
+ pctx.setTransform(S.dpr,0,0,S.dpr,0,0);pctx.clearRect(0,0,Math.max(1,Math.floor(stage.clientWidth)),Math.max(1,Math.floor(stage.clientHeight)));if(!S.draw)return;
+ const d=S.draw;pctx.save();pctx.translate(S.panX,S.panY);pctx.scale(S.zoom,S.zoom);
+ if(S.tool==='pen'||S.tool==='eraser')drawStroke(pctx,{tool:S.tool,color:S.color,size:S.size,points:d.points});
+ else{const p=d.last,a=d.start;let x={tool:S.tool,color:S.color,size:S.size};if(S.tool==='line')Object.assign(x,{x1:a.x,y1:a.y,x2:p.x,y2:p.y});if(S.tool==='rect')Object.assign(x,{x:a.x,y:a.y,w:p.x-a.x,h:p.y-a.y});if(S.tool==='circle')Object.assign(x,{cx:a.x,cy:a.y,r:Math.hypot(p.x-a.x,p.y-a.y)});drawStroke(pctx,x)}
+ pctx.restore();
 }
 function finish(e){
  if(!S.draw)return;const d=S.draw,p=stagePoint(e);
@@ -384,7 +392,7 @@ $('export').onclick=()=>{
 };
 
 window.addEventListener('keydown',e=>{if(e.target.matches('input,[contenteditable]'))return;const k=e.key.toLowerCase();const map={p:'pen',e:'eraser',v:'select',l:'line',r:'rect',c:'circle',n:'note',h:'pan'};if(map[k])setTool(map[k]);if((e.metaKey||e.ctrlKey)&&k==='z'){e.preventDefault();undo()}if((e.metaKey||e.ctrlKey)&&k==='y'){e.preventDefault();redo()}});
-window.addEventListener('resize',()=>{render();renderGrid()});
+window.addEventListener('resize',()=>{resizeCanvas();render();renderGrid()});
 
 let saved=null;try{saved=JSON.parse(localStorage.getItem(KEY)||'null')}catch(e){}
 if(saved?.boards?.length){S.boards=saved.boards;S.boardId=S.boards[0].id;S.strokes=S.boards[0].strokes||[];S.objects=S.boards[0].objects||[];$('boardName').textContent=S.boards[0].name}
